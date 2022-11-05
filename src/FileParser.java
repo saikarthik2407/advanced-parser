@@ -3,14 +3,18 @@ import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
 import java.util.*;
-import java.util.function.Consumer;
 
 public class FileParser {
 
-    private final Map<String, Integer> valueStore = new HashMap<>();
     private final List<String> codeLines = new ArrayList<>();
+    private final HashMap<String, Variable> variables = new HashMap<>();
+    private final InputFile inputFile;
+    private final Scanner readInput;
 
-    FileParser() { }
+    FileParser() {
+        inputFile = InputFile.getInstance();
+        readInput = new Scanner(System.in);
+    }
 
     /**
      * Main parse function
@@ -20,7 +24,8 @@ public class FileParser {
         try  {
             BufferedReader bufferedReader = new BufferedReader(new FileReader(file));
             splitCodeToSegments(bufferedReader);
-            examineCodeLine();
+            // execute code from first line to last line
+            executeInstructions(inputFile.getFirstLineNumber(), inputFile.getLastLineNumber());
         } catch (IOException e) {
             System.out.println("Error while reading a file.");
         }
@@ -36,104 +41,232 @@ public class FileParser {
             while ((line = br.readLine()) != null) {
                 codeLines.add(line);
             }
+            inputFile.setCodeLines(codeLines);
         } catch (IOException e) {
             System.out.println("Error while reading the lines.");
         }
     }
 
+    private void executeInstructions(Integer startLineNumber, Integer endLineNumber) {
+        inputFile.getCodeLines().keySet().forEach(lineNumber -> {
+            if (lineNumber >= startLineNumber && lineNumber <= endLineNumber)
+                examineCodeLine(lineNumber);
+        });
+    }
+
     /**
      * The function examines each line of code to parse
      */
-    private void examineCodeLine() {
-        codeLines.forEach(new Consumer<String>() {
-            @Override
-            public void accept(String lineOfCode) {
-                String[] codeWordsArray = lineOfCode.split(" ");
-                switch (codeWordsArray[0]) {
-                    case "LET" -> examineInitializationStatement(codeWordsArray);
-                    case "PRINT", "PRINTLN" -> examinePrintStatements(codeWordsArray);
-                    default -> System.out.println("Syntax error occurred while parsing");
-                }
+    private void examineCodeLine(Integer lineNumber) {
+        String code = inputFile.getCodeLines().get(lineNumber);
+        String decisionWord = StringUtils.getFirstWord(code);
+        switch (decisionWord) {
+            case "INTEGER" -> examineDeclarationInstruction(lineNumber, code);
+            case "INPUT" -> examineInputInstruction(lineNumber, code);
+            case "LET" -> examineInitializationInstruction(lineNumber, code);
+            case "PRINT", "PRINTLN" -> examinePrintInstruction(lineNumber, code);
+            case "IF" -> examineConditionalInstruction(lineNumber, code);
+            case "GOTO" -> examineGotoInstruction(lineNumber, code);
+            case "END" -> System.exit(0);
+            default -> System.out.println("Syntax error occurred while parsing");
+        }
+    }
+
+    /**
+     * This function examines declaration instructions and creates variables for the encountered variable declarations
+     * @param lineNumber line number of declaration instruction
+     * @param codeLine instruction code line
+     */
+    private void examineDeclarationInstruction(Integer lineNumber, String codeLine) {
+        String instruction = StringUtils.removeFirstWordFromString(codeLine);
+        String[] instructionVariables = instruction.split(",");
+        for (String variable: instructionVariables) {
+            if (StringUtils.isValidVariableName(variable))
+                variables.put(variable, new Variable(variable));
+            else {
+                System.out.println("Not a valid variable name at "+lineNumber);
+                System.exit(0);
             }
-        });
+        }
+    }
+
+    /**
+     * This function helps to retrieve console input from the user.
+     * @param lineNumber line number of input instruction
+     * @param codeLine instruction code line
+     */
+    private void examineInputInstruction(Integer lineNumber, String codeLine) {
+        String instruction = StringUtils.removeFirstWordFromString(codeLine);
+        String[] instructionVariables = instruction.split(",");
+        for (String variable: instructionVariables) {
+            if (!variables.containsKey(variable)) {
+                System.out.println(variable+" variable not declared at "+lineNumber);
+                System.exit(0);
+            }
+        }
+        String consoleInput = readInput.nextLine();
+        if (!Objects.equals(consoleInput, "")) {
+            String[] inputs = consoleInput.split(" ");
+            if (inputs.length == instructionVariables.length) {
+                for (int i = 0; i < instructionVariables.length; i++) {
+                    try {
+                        Variable requiredVariable = variables.get(instructionVariables[i]);
+                        requiredVariable.value = Integer.parseInt(inputs[i]);
+                        requiredVariable.state = VariableState.INITIALIZED;
+                    } catch (NumberFormatException e) {
+                        System.out.println(e.getMessage());
+                        System.exit(0);
+                    }
+                }
+            } else {
+                System.out.println("value of "+instructionVariables[inputs.length]+" is not entered at "+lineNumber);
+                System.exit(0);
+            }
+        } else {
+            System.out.println("value of "+instructionVariables[0]+" is not entered at "+lineNumber);
+            System.exit(0);
+        }
+    }
+
+    /**
+     * This part of code handles the lines of code that deal with initialization i.e: which start with LET
+     * @param lineNumber is the line number of the initialization instruction
+     * @param code is a particular line of code
+     */
+    private void examineInitializationInstruction(Integer lineNumber, String code) {
+        String instruction = StringUtils.removeFirstWordFromString(code);
+        String expression = instruction.replace(" ", "");
+        String[] operands = expression.split("=");
+        String variableBeingAssigned = operands[0];
+        if (!variables.containsKey(variableBeingAssigned)) {
+            System.out.println(variableBeingAssigned+" variable not declared at "+lineNumber);
+            System.exit(0);
+        } else if (operands.length > 2) {
+            System.out.println("Invalid initialization at "+lineNumber);
+            System.exit(0);
+        }
+        String expressionString = operands[1];
+        boolean hasOnlyDigits = expressionString.matches("[0-9]+");
+        if (hasOnlyDigits) {
+            variables.get(variableBeingAssigned).value = Integer.parseInt(expressionString);
+        } else {
+            StringBuilder mathExpressionBuilder = new StringBuilder();
+            variables.get(variableBeingAssigned).value = evaluate(buildMathematicalExpressionForEvaluation(
+                    mathExpressionBuilder, expressionString));
+        }
+        variables.get(variableBeingAssigned).state = VariableState.INITIALIZED;
+    }
+
+    /**
+     * The function examines the print statements and parses them
+     * @param lineNumber is the instruction line to be printed
+     * @param code is the line to print
+     */
+    private void examinePrintInstruction(Integer lineNumber, String code) {
+        String decisionWord = StringUtils.getFirstWord(code);
+        String instruction = StringUtils.removeFirstWordFromString(code);
+        if (variables.containsKey(instruction)) {
+            Integer value = variables.get(instruction).value;
+            if (Objects.equals(decisionWord, "PRINT"))
+                System.out.print(value);
+            else
+                System.out.println(value);
+        } else {
+            if (!instruction.startsWith("\"")) {
+                StringBuilder printableToBeEvaluated = new StringBuilder();
+                int expressionResult = evaluate(buildMathematicalExpressionForEvaluation(printableToBeEvaluated, instruction));
+                if (Objects.equals(decisionWord, "PRINT"))
+                    System.out.print(expressionResult);
+                else
+                    System.out.println(expressionResult);
+            } else {
+                String printableResult = instruction.replaceAll("\"", "");
+                if (Objects.equals(decisionWord, "PRINT"))
+                    System.out.print(printableResult);
+                else
+                    System.out.println(printableResult);
+            }
+        }
+    }
+
+    private void examineConditionalInstruction(Integer lineNumber, String code) {
+        String codeWithoutIf = StringUtils.removeFirstWordFromString(code);
+        String[] conditionalClauses = codeWithoutIf.split("THEN");
+        String ifClause = conditionalClauses[0];
+        String thenClause = conditionalClauses[1];
+        ifClause = ifClause.replace(" ", "");
+        String relationalOperator = ifClause.contains("<") ? "<" : (ifClause.contains(">") ? ">"
+                : (ifClause.contains("=") ? "=" : (ifClause.contains("!") ? "!" : "" )));
+        if (relationalOperator.equals("")) {
+            System.out.println("If clause doesn't have a valid relational operator at "+lineNumber);
+            System.exit(0);
+        }
+        String[] relationalOperands = ifClause.split(relationalOperator);
+        for (int i = 0; i < relationalOperands.length; i++) {
+            relationalOperands[i] = mapVariableNamesToValuesInExpression(relationalOperands[i]);
+        }
+        if (computeExpressionResult(relationalOperator, evaluate(relationalOperands[0]), evaluate(relationalOperands[1]))) {
+            thenClause = thenClause.trim();
+            String decisionWord = StringUtils.getFirstWord(thenClause);
+            switch (decisionWord) {
+                case "PRINT", "PRINTLN" -> examinePrintInstruction(lineNumber, thenClause);
+                case "GOTO" -> examineGotoInstruction(lineNumber, thenClause);
+            }
+        }
+    }
+
+    private void examineGotoInstruction(Integer lineNumberOfGotoInstruction, String code) {
+        String[] codeWords = code.trim().split(" ");
+        if (codeWords.length != 2) {
+            System.out.println("Improper GOTO statement at "+lineNumberOfGotoInstruction);
+            System.exit(0);
+        }
+        Integer gotoLineNumber = Integer.parseInt(codeWords[codeWords.length - 1]);
+        executeInstructions(gotoLineNumber, inputFile.getLastLineNumber());
     }
 
     /**
      * This function builds a numerical expression from a variable expression by retrieving the values of
      * variables from the hashMap which we stored during initialization
      * @param mathExpressionBuilder is the numerical expression builder
-     * @param variableExpression is the expression that has variables instead of numbers
+     * @param expression is the expression that has variables instead of numbers
      * @return the numerical expression
      */
-    private String buildMathematicalExpression(StringBuilder mathExpressionBuilder, String variableExpression) {
-        for (int i = 0; i < variableExpression.length(); i++) {
-            Boolean isContainedInMap = valueStore.containsKey(Character.toString(variableExpression.charAt(i)));
-            if (isContainedInMap) {
-                Integer x = valueStore.get(Character.toString(variableExpression.charAt(i)));
-                mathExpressionBuilder.append(x.toString());
+    private String buildMathematicalExpressionForEvaluation(StringBuilder mathExpressionBuilder, String expression) {
+        StringBuilder variableNameBuilder = new StringBuilder();
+        for (int i = 0; i < expression.length(); i++) {
+            if (expression.charAt(i) == '+' || expression.charAt(i) == '-'
+                    || expression.charAt(i) == '*' || expression.charAt(i) == '/'
+                    || (expression.charAt(i) >= '0' && expression.charAt(i) <= '9')) {
+                mathExpressionBuilder.append(expression.charAt(i));
+                variableNameBuilder.delete(0, variableNameBuilder.length());
             } else {
-                mathExpressionBuilder.append(variableExpression.charAt(i));
+                String variableName = variableNameBuilder.append(expression.charAt(i)).toString();
+                if (variables.containsKey(variableName)) {
+                    mathExpressionBuilder.append(variables.get(variableName).value);
+                }
             }
         }
         return mathExpressionBuilder.toString();
     }
 
-    /**
-     * This part of code handles the lines of code that deal with initialization i.e: which start with LET
-     * @param codeWords are the words of code in a particular line of code
-     */
-    private void examineInitializationStatement(String[] codeWords) {
-        StringBuilder expressionBuilder = new StringBuilder();
-        for (int i = 1; i < codeWords.length; expressionBuilder.append(codeWords[i++]));
-        String expression = expressionBuilder.toString();
-        String[] equationOperands = expression.split("=");
-        String key = equationOperands[0];
-        String value = equationOperands[1];
-        boolean hasOnlyDigits = value.matches("[0-9]+");
-        if (hasOnlyDigits) {
-            Integer numericalValue = Integer.parseInt(equationOperands[1]);
-            valueStore.put(key, numericalValue);
-        } else {
-            StringBuilder expressionToBeEvaluated = new StringBuilder();
-            int result = evaluate(buildMathematicalExpression(expressionToBeEvaluated, value));
-            valueStore.put(key, result);
-        }
-    }
-
-    /**
-     * The function examines the print statements and parses them
-     * @param codeWords are words of code from print lines
-     */
-    private void examinePrintStatements(String[] codeWords) {
-        StringBuilder find = new StringBuilder();
-        for (int i = 1; i < codeWords.length; i++) {
-            find.append(codeWords[i]);
-        }
-        String distinctWord = find.toString();
-        if (valueStore.containsKey(distinctWord)) {
-            Integer value = valueStore.get(distinctWord);
-            if (Objects.equals(codeWords[0], "PRINT"))
-                System.out.print(value);
-            else
-                System.out.println(value);
-        } else {
-            if (!distinctWord.startsWith("\"")) {
-                StringBuilder printableToBeEvaluated = new StringBuilder();
-                int expressionResult = evaluate(buildMathematicalExpression(printableToBeEvaluated, distinctWord));
-                if (Objects.equals(codeWords[0], "PRINT"))
-                    System.out.print(expressionResult);
-                else
-                    System.out.println(expressionResult);
-            } else {
-                StringBuilder printableString = new StringBuilder();
-                for (int i = 1; i < codeWords.length; printableString.append(codeWords[i++]));
-                String printableResult = printableString.toString().replaceAll("\"", "");
-                if (Objects.equals(codeWords[0], "PRINT"))
-                    System.out.print(printableResult);
-                else
-                    System.out.println(printableResult);
+    private String mapVariableNamesToValuesInExpression(String expression) {
+        String mappedExpression = expression;
+        for (String variableName: variables.keySet()) {
+            if (mappedExpression.contains(variableName)) {
+                mappedExpression = mappedExpression.replace(variableName, variables.get(variableName).value.toString());
             }
         }
+        return mappedExpression;
+    }
+
+    private Boolean computeExpressionResult(String relationalOperator, Integer leftOperand, Integer rightOperand) {
+        return switch (relationalOperator) {
+            case "<" -> leftOperand < rightOperand;
+            case ">" -> leftOperand > rightOperand;
+            case "=" -> Objects.equals(leftOperand, rightOperand);
+            default -> !Objects.equals(leftOperand, rightOperand);
+        };
     }
 
     /**
@@ -200,4 +333,20 @@ public class FileParser {
         }
         return 0;
     }
+}
+
+class Variable {
+    String name;
+    Integer value;
+    VariableState state;
+
+    Variable(String name) {
+        value = Integer.MIN_VALUE;
+        state = VariableState.DECLARED;
+    }
+}
+
+enum VariableState {
+    DECLARED,
+    INITIALIZED
 }
