@@ -1,14 +1,14 @@
 import java.io.File;
 
 public class Main {
-
     public static void main(String[] args) {
+        // retrieve the file from the device based on the file name given in the command line arguments
+        File silFile = new File(args[0]);
 
-        // retrieve the file from the file name given in command line arguments
-        File customCommandsFile = new File(args[0]);
+        // Create an instance of File Parser that supports SIL file parsing
+        FileParser silFileParser = new FileParser();
 
-        // Create an instance of File Parser that supports custom file parsing
-        FileParser fileParser = new FileParser();
-        fileParser.parse(customCommandsFile);
+        // Start SIL file parsing
+        silFileParser.parse(silFile);
     }
 }
