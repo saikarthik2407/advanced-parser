@@ -1,6 +1,6 @@
 public class StringUtils {
 
-    public static String getFirstWord(String sentence) {
+    public static String getFirstWordOfSentence(String sentence) {
         return sentence.split(" ")[0];
     }
 
@@ -12,9 +12,9 @@ public class StringUtils {
         return isVariableFirstLetterAppropriate && areVariableLettersValid;
     }
 
-    public static String removeFirstWordFromString(String actualString) {
-        int wordStartPosition = getFirstWord(actualString).length();
-        while (actualString.charAt(wordStartPosition) == ' ') {
+    public static String deleteFirstWordFromSentence(String actualString) {
+        int wordStartPosition = getFirstWordOfSentence(actualString).length();
+        while (actualString.charAt(wordStartPosition) == ' ') { // checks for multiple spaces after first word
             wordStartPosition += 1;
         }
         return actualString.substring(wordStartPosition);
